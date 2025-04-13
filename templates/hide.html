@@ -1,0 +1,298 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4">Hide File</h2>
+<form id="hideForm" enctype="multipart/form-data">
+    <!-- Host File Section -->
+    <div class="mb-4">
+        <label class="form-label h5">Host Image (PNG)</label>
+        <div class="drop-zone" id="hostDropZone">
+            <span class="text-muted">Drag & drop PNG image here or click to select</span>
+            <input type="file" name="host_file" class="hidden-input" accept="image/png" required>
+            <ul class="file-list" id="hostFileList"></ul>
+        </div>
+        <div id="capacityWarning" class="alert alert-warning mt-2" style="display: none;">
+            Capacity: <span id="capacityValue">0</span> KB available
+        </div>
+    </div>
+
+    <!-- File to Hide Section -->
+    <div class="mb-4">
+        <label class="form-label h5">File to Hide</label>
+        <div class="drop-zone" id="hiddenDropZone">
+            <span class="text-muted">Drag & drop file to hide here or click to select</span>
+            <input type="file" name="hidden_file" class="hidden-input" required>
+            <ul class="file-list" id="hiddenFileList"></ul>
+        </div>
+        <div id="fileSizeWarning" class="alert alert-danger mt-2" style="display: none;"></div>
+    </div>
+
+    <!-- Key Generation Section -->
+    <div class="mb-4">
+        <div class="card">
+            <div class="card-header">
+                RSA Key Generation
+                <button type="button" class="btn btn-sm btn-secondary float-end" 
+                        id="generateKeyButton" onclick="generateKeyPair()">
+                    Generate Keys
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Passphrase (optional):</label>
+                    <input type="password" id="keyPassphrase" class="form-control">
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <label class="form-label">Public Key:</label>
+                        <textarea id="publicKeyArea" class="form-control" rows="4" readonly></textarea>
+                        <button type="button" class="btn btn-success mt-2 w-100" 
+                                id="downloadPublicKey" style="display: none;">
+                            Download Public Key
+                        </button>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Private Key:</label>
+                        <textarea id="privateKeyArea" class="form-control" rows="4" readonly></textarea>
+                        <button type="button" class="btn btn-danger mt-2 w-100" 
+                                id="downloadPrivateKey" style="display: none;">
+                            Download Private Key
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Public Key Upload -->
+    <div class="mb-4">
+        <label class="form-label h5">Use Existing Public Key</label>
+        <div class="drop-zone" id="keyDropZone">
+            <span class="text-muted">Drag & drop public key here or click to select</span>
+            <input type="file" name="public_key" class="hidden-input">
+            <ul class="file-list" id="keyFileList"></ul>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-lg w-100">Embed and Download</button>
+</form>
+
+<!-- Progress Section -->
+<div class="mt-4" id="progress_div" style="display: none;">
+    <div class="progress">
+        <div class="progress-bar" id="progress_bar" role="progressbar" style="width: 0%;">0%</div>
+    </div>
+    <div class="mt-2 text-muted" id="progress_text"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Initialize Drop Zones
+    function setupDropZone(dropZone, input, fileList) {
+        dropZone.addEventListener('click', () => input.click());
+        
+        input.addEventListener('change', () => {
+            fileList.innerHTML = input.files[0] ? 
+                `<li>${input.files[0].name}</li>` : '';
+        });
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            input.files = e.dataTransfer.files;
+            fileList.innerHTML = input.files[0] ? 
+                `<li>${input.files[0].name}</li>` : '';
+        });
+    }
+
+    // Setup all drop zones
+    setupDropZone(
+        document.getElementById('hostDropZone'),
+        document.querySelector('input[name="host_file"]'),
+        document.getElementById('hostFileList')
+    );
+
+    setupDropZone(
+        document.getElementById('hiddenDropZone'),
+        document.querySelector('input[name="hidden_file"]'),
+        document.getElementById('hiddenFileList')
+    );
+
+    setupDropZone(
+        document.getElementById('keyDropZone'),
+        document.querySelector('input[name="public_key"]'),
+        document.getElementById('keyFileList')
+    );
+
+    // Key Generation Logic
+    window.generateKeyPair = async function() {
+        const passphrase = document.getElementById('keyPassphrase').value;
+        const generateButton = document.getElementById('generateKeyButton');
+        const originalButtonText = generateButton.innerHTML;
+
+        try {
+            // Show loading state
+            generateButton.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Generating...';
+            generateButton.disabled = true;
+
+            const response = await fetch('/generate-keypair/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `passphrase=${encodeURIComponent(passphrase)}`
+            });
+
+            if (!response.ok) throw new Error(await response.text());
+
+            const keys = await response.json();
+
+            // Update UI with new keys
+            document.getElementById('publicKeyArea').value = keys.public_key;
+            document.getElementById('privateKeyArea').value = keys.private_key;
+
+            // Show download buttons
+            document.getElementById('downloadPublicKey').style.display = 'block';
+            document.getElementById('downloadPrivateKey').style.display = 'block';
+
+            // Set up download handlers
+            document.getElementById('downloadPublicKey').onclick = () => {
+                downloadKey(keys.public_key, 'public_key.pem');
+            };
+            document.getElementById('downloadPrivateKey').onclick = () => {
+                downloadKey(keys.private_key, 'private_key.pem');
+            };
+
+        } catch (error) {
+            alert(`Key generation failed: ${error.message}`);
+        } finally {
+            generateButton.innerHTML = originalButtonText;
+            generateButton.disabled = false;
+        }
+    };
+
+    function downloadKey(content, filename) {
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    // Form Submission Handler
+    document.getElementById('hideForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const formData = new FormData(e.target);
+        const progressBar = document.getElementById('progress_bar');
+        const progressText = document.getElementById('progress_text');
+
+        // Validate generated keys or uploaded public key
+        const generatedPublicKey = document.getElementById('publicKeyArea').value;
+        const uploadedPublicKey = document.querySelector('input[name="public_key"]').files[0];
+        
+        if (!generatedPublicKey && !uploadedPublicKey) {
+            alert('Please generate or upload a public key');
+            return;
+        }
+
+        // Use generated key if available
+        if (generatedPublicKey) {
+            const keyFile = new File([generatedPublicKey], 'public_key.pem', 
+                                   { type: 'text/plain' });
+            formData.set('public_key', keyFile);
+        }
+
+        // Show progress
+        progressBar.style.width = '0%';
+        progressBar.textContent = '0%';
+        document.getElementById('progress_div').style.display = 'block';
+
+        try {
+            const response = await fetch('/hide/', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) throw new Error(await response.text());
+
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            
+            // Auto-download result
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `stego_${formData.get('host_file').name}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+        } finally {
+            document.getElementById('progress_div').style.display = 'none';
+        }
+    });
+
+    // Image Capacity Calculator
+    document.querySelector('input[name="host_file"]').addEventListener('change', function() {
+        const file = this.files[0];
+        if (!file) return;
+
+        const img = new Image();
+        img.onload = () => {
+            const capacityKB = Math.floor((img.width * img.height * 3) / 1024);
+            document.getElementById('capacityValue').textContent = capacityKB;
+            document.getElementById('capacityWarning').style.display = 'block';
+            
+            const hiddenFile = document.querySelector('input[name="hidden_file"]').files[0];
+            if (hiddenFile) {
+                const fileSizeKB = Math.floor(hiddenFile.size / 1024);
+                if (fileSizeKB > capacityKB) {
+                    document.getElementById('fileSizeWarning').style.display = 'block';
+                    document.getElementById('fileSizeWarning').textContent = 
+                        `File too large (${fileSizeKB}KB > ${capacityKB}KB)`;
+                }
+            }
+        };
+        img.src = URL.createObjectURL(file);
+    });
+
+    // File Size Checker
+    document.querySelector('input[name="hidden_file"]').addEventListener('change', function() {
+        const hostFile = document.querySelector('input[name="host_file"]').files[0];
+        if (!hostFile) return;
+
+        const img = new Image();
+        img.onload = () => {
+            const capacityKB = Math.floor((img.width * img.height * 3) / 1024);
+            const fileSizeKB = Math.floor(this.files[0].size / 1024);
+            
+            if (fileSizeKB > capacityKB) {
+                document.getElementById('fileSizeWarning').style.display = 'block';
+                document.getElementById('fileSizeWarning').textContent = 
+                    `File too large (${fileSizeKB}KB > ${capacityKB}KB)`;
+            } else {
+                document.getElementById('fileSizeWarning').style.display = 'none';
+            }
+        };
+        img.src = URL.createObjectURL(hostFile);
+    });
+});
+</script>
+{% endblock %}

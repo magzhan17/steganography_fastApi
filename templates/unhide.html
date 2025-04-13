@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4">Unhide File</h2>
+<form id="unhideForm" enctype="multipart/form-data">
+    <div class="mb-4">
+        <label class="form-label h5">Stego Image</label>
+        <div class="drop-zone" id="stegoDropZone">
+            <span class="text-muted">Drag & drop stego image here or click to select</span>
+            <input type="file" name="stego_image" class="hidden-input" accept="image/png" required>
+            <ul class="file-list" id="stegoFileList"></ul>
+        </div>
+    </div>
+
+    <div class="mb-4">
+        <label class="form-label h5">Private Key</label>
+        <div class="drop-zone" id="keyDropZone">
+            <span class="text-muted">Drag & drop private key here or click to select</span>
+            <input type="file" name="private_key" class="hidden-input" required>
+            <ul class="file-list" id="keyFileList"></ul>
+        </div>
+    </div>
+
+    <div class="mb-4">
+        <label class="form-label h5">Passphrase</label>
+        <input type="password" name="passphrase" class="form-control form-control-lg" 
+               placeholder="Enter passphrase (if required)">
+    </div>
+
+    <button type="submit" class="btn btn-success btn-lg w-100">Decrypt and Extract</button>
+</form>
+
+<div class="mt-4" id="progress_div" style="display: none;">
+    <div class="progress">
+        <div class="progress-bar" id="progress_bar" role="progressbar" style="width: 0%;">0%</div>
+    </div>
+    <div class="mt-2 text-muted" id="progress_text"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    function setupDropZone(dropZone, input, fileList) {
+        dropZone.addEventListener('click', () => input.click());
+        
+        input.addEventListener('change', () => {
+            fileList.innerHTML = input.files[0] ? 
+                `<li>${input.files[0].name}</li>` : '';
+        });
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            input.files = e.dataTransfer.files;
+            fileList.innerHTML = input.files[0] ? 
+                `<li>${input.files[0].name}</li>` : '';
+        });
+    }
+
+    // Initialize drop zones
+    setupDropZone(
+        document.getElementById('stegoDropZone'),
+        document.querySelector('input[name="stego_image"]'),
+        document.getElementById('stegoFileList')
+    );
+
+    setupDropZone(
+        document.getElementById('keyDropZone'),
+        document.querySelector('input[name="private_key"]'),
+        document.getElementById('keyFileList')
+    );
+
+    // Form submission handler
+    document.getElementById('unhideForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const formData = new FormData(e.target);
+        const progressBar = document.getElementById('progress_bar');
+        const progressText = document.getElementById('progress_text');
+
+        progressBar.style.width = '0%';
+        progressBar.textContent = '0%';
+        document.getElementById('progress_div').style.display = 'block';
+
+        try {
+            const response = await fetch('/unhide/', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail);
+            }
+
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            
+            // Extract filename from content-disposition header
+            const filename = response.headers.get('content-disposition')
+                            ?.split('filename=')[1]
+                            ?.replace(/"/g, '') || 'extracted_file';
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+        } finally {
+            document.getElementById('progress_div').style.display = 'none';
+        }
+    });
+});
+</script>
+{% endblock %}
