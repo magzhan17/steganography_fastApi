@@ -9,6 +9,8 @@ from Crypto.Util.Padding import pad, unpad
 from Crypto.Protocol.KDF import PBKDF2
 from pathlib import Path
 from PIL import Image
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
 import numpy as np
 import os
 import struct
@@ -177,42 +179,43 @@ async def hide_file(
     public_key: UploadFile = File(...),
 ):
     try:
-        # Read and validate files
-        host_image = Image.open(io.BytesIO(await host_file.read()))
-        if host_image.mode not in ['RGB', 'RGBA']:
-            raise ValueError("Only RGB/RGBA images supported")
-
-        # Validate image format (allow PNG and BMP only)
-        if host_image.format not in ["PNG", "BMP"]:
-            raise ValueError("Only PNG or BMP formats supported as container images.")
-
-        hidden_filename = hidden_file.filename.encode()
-        if len(hidden_filename) > 255:
-            raise ValueError("Filename too long (max 255 bytes).")
-        hidden_data = await hidden_file.read()
+        # Read inputs
+        host_image_data = await host_file.read()
+        hidden_data_raw = await hidden_file.read()
         public_key_data = await public_key.read()
 
-        # Include filename in encrypted data
-        combined_data = struct.pack("B", len(hidden_filename)) + hidden_filename + hidden_data
-        encrypted_data = encrypt_data(combined_data, public_key_data)
+        # Encode filename safely
+        filename_bytes = hidden_file.filename.encode("utf-8")
+        if len(filename_bytes) > 255:
+            raise ValueError("Filename too long (max 255 bytes)")
+        hidden_data = len(filename_bytes).to_bytes(1, "big") + filename_bytes + hidden_data_raw
+
+        # Load host image
+        host_image = Image.open(io.BytesIO(host_image_data))
+        if host_image.mode not in ["RGB", "RGBA"]:
+            raise ValueError("Only RGB/RGBA images supported")
+
+        # Encrypt hidden data
+        encrypted_data = encrypt_data(hidden_data, public_key_data)
 
         # Check capacity
         capacity = calculate_capacity(host_image)
         if len(encrypted_data) > capacity:
             raise ValueError(f"Image too small. Needs {len(encrypted_data)} bytes, has {capacity}")
 
-        # Embed data using LSB
-        stego_image = embed_lsb(host_image, encrypted_data)
+        # Run embedding asynchronously
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as pool:
+            stego_image = await loop.run_in_executor(pool, embed_lsb, host_image, encrypted_data)
 
-        # Save to buffer
+        # Save stego image to buffer
         buffer = io.BytesIO()
-        format_used = "BMP" if host_image.format == "BMP" else "PNG"
-        stego_image.save(buffer, format=format_used)
+        stego_image.save(buffer, format="PNG")
         buffer.seek(0)
 
         return StreamingResponse(
             buffer,
-            media_type="image/png" if format_used == "PNG" else "image/bmp",
+            media_type="image/png",
             headers={"Content-Disposition": f"attachment; filename=stego_{host_file.filename}"}
         )
 
