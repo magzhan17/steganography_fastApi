@@ -182,13 +182,21 @@ async def hide_file(
         host_image = Image.open(io.BytesIO(await host_file.read()))
         if host_image.mode not in ['RGB', 'RGBA']:
             raise ValueError("Only RGB/RGBA images supported")
-        
+
+        # Validate image format (allow PNG and BMP only)
+        if host_image.format not in ["PNG", "BMP"]:
+            raise ValueError("Only PNG or BMP formats supported as container images.")
+
+        hidden_filename = hidden_file.filename.encode()
+        if len(hidden_filename) > 255:
+            raise ValueError("Filename too long (max 255 bytes).")
         hidden_data = await hidden_file.read()
         public_key_data = await public_key.read()
 
-        # Encrypt data
-        encrypted_data = encrypt_data(hidden_data, public_key_data)
-        
+        # Include filename in encrypted data
+        combined_data = struct.pack("B", len(hidden_filename)) + hidden_filename + hidden_data
+        encrypted_data = encrypt_data(combined_data, public_key_data)
+
         # Check capacity
         capacity = calculate_capacity(host_image)
         if len(encrypted_data) > capacity:
@@ -196,15 +204,16 @@ async def hide_file(
 
         # Embed data using LSB
         stego_image = embed_lsb(host_image, encrypted_data)
-        
+
         # Save to buffer
         buffer = io.BytesIO()
-        stego_image.save(buffer, format="PNG")
+        format_used = "BMP" if host_image.format == "BMP" else "PNG"
+        stego_image.save(buffer, format=format_used)
         buffer.seek(0)
 
         return StreamingResponse(
             buffer,
-            media_type="image/png",
+            media_type="image/png" if format_used == "PNG" else "image/bmp",
             headers={"Content-Disposition": f"attachment; filename=stego_{host_file.filename}"}
         )
 
@@ -232,13 +241,17 @@ async def unhide_file(
         encrypted_data = extract_lsb(image)
         decrypted_data = decrypt_data(encrypted_data, private_key_data, passphrase)
 
-        # Return the decrypted file
-        return StreamingResponse(io.BytesIO(decrypted_data),
+        # Recover original filename
+        name_len = decrypted_data[0]
+        filename = decrypted_data[1:1+name_len].decode()
+        file_content = decrypted_data[1+name_len:]
+
+        return StreamingResponse(io.BytesIO(file_content),
                                  media_type="application/octet-stream",
-                                 headers={"Content-Disposition": "attachment; filename=extracted_file"})
+                                 headers={"Content-Disposition": f"attachment; filename={filename}"})
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
+ 
 @app.post("/generate-keypair/")
 async def generate_keypair(passphrase: str = Form(default='')):
     try:
