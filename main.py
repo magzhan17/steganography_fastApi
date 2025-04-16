@@ -45,33 +45,32 @@ def calculate_capacity(image):
     return (width * height * BITS_PER_PIXEL) // 8
 
 def embed_lsb(host_image, data):
-    """Embed data into image using LSB steganography (fixed version)"""
-    # Create writable copy of the image array
+    """Efficiently embed data into an image using LSB steganography."""
     img_array = np.array(host_image).copy()
-    height, width, channels = img_array.shape
-    
-    # Convert data to binary with length header
+
+    if img_array.ndim != 3 or img_array.shape[2] < BITS_PER_PIXEL:
+        raise ValueError("Image must have at least 3 channels (RGB)")
+
+    # Flatten image for faster access
+    flat_image = img_array[:, :, :BITS_PER_PIXEL].flatten()
+
+    # Prepare binary data with length header
     data_len = len(data).to_bytes(4, 'big')
     binary_data = bytes_to_binary(data_len + data)
-    
-    # Calculate maximum embeddable bits
-    max_bits = height * width * BITS_PER_PIXEL
-    if len(binary_data) > max_bits:
+    num_bits = len(binary_data)
+
+    if num_bits > len(flat_image):
         raise ValueError("Image too small to hide data")
-    
-    # Embed data in LSBs
-    data_index = 0
-    for row in range(height):
-        for col in range(width):
-            for ch in range(BITS_PER_PIXEL):  # Use first 3 channels (R, G, B)
-                if data_index >= len(binary_data):
-                    return Image.fromarray(img_array)
-                if ch >= channels:  # Handle images with < 3 channels
-                    continue
-                # Modify only the LSB
-                img_array[row, col, ch] = (img_array[row, col, ch] & 0xFE) | int(binary_data[data_index])
-                data_index += 1
+
+    # Convert to array of ints (0 or 1) and update LSBs
+    binary_bits = np.array(list(binary_data), dtype=np.uint8)
+    flat_image[:num_bits] &= 0b11111110  # Clear LSB
+    flat_image[:num_bits] |= binary_bits  # Set new LSB
+
+    # Reshape and replace into image
+    img_array[:, :, :BITS_PER_PIXEL] = flat_image.reshape(img_array.shape[0], img_array.shape[1], BITS_PER_PIXEL)
     return Image.fromarray(img_array)
+
 
 
 def extract_lsb(image):
