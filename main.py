@@ -11,6 +11,7 @@ from pathlib import Path
 from PIL import Image
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
+import uvicorn
 import numpy as np
 import os
 import struct
@@ -272,5 +273,4 @@ async def generate_keypair(passphrase: str = Form(default='')):
         raise HTTPException(500, detail=f"Key generation failed: {str(e)}")
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8000)

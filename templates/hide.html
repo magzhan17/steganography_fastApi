@@ -73,28 +73,26 @@
         </div>
     </div>
 
-    <button type="submit" class="btn btn-primary btn-lg w-100">Embed and Download</button>
-</form>
-
-<!-- Progress Section -->
-<div class="mt-4" id="progress_div" style="display: none;">
-    <div class="progress">
-        <div class="progress-bar" id="progress_bar" role="progressbar" style="width: 0%;">0%</div>
+    <!-- Submit Button and Spinner -->
+    <div class="d-grid gap-2">
+        <button type="submit" id="hideBtn" class="btn btn-primary btn-lg">Embed and Download</button>
+        <div id="hideSpinner" class="text-center mt-2" style="display: none;">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="mt-2">Embedding data into image...</p>
+        </div>
     </div>
-    <div class="mt-2 text-muted" id="progress_text"></div>
-</div>
+</form>
 {% endblock %}
 
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    // Initialize Drop Zones
+    // Drop zone setup
     function setupDropZone(dropZone, input, fileList) {
         dropZone.addEventListener('click', () => input.click());
-        
+
         input.addEventListener('change', () => {
-            fileList.innerHTML = input.files[0] ? 
-                `<li>${input.files[0].name}</li>` : '';
+            fileList.innerHTML = input.files[0] ? `<li>${input.files[0].name}</li>` : '';
         });
 
         dropZone.addEventListener('dragover', (e) => {
@@ -110,12 +108,10 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             dropZone.classList.remove('dragover');
             input.files = e.dataTransfer.files;
-            fileList.innerHTML = input.files[0] ? 
-                `<li>${input.files[0].name}</li>` : '';
+            fileList.innerHTML = input.files[0] ? `<li>${input.files[0].name}</li>` : '';
         });
     }
 
-    // Setup all drop zones
     setupDropZone(
         document.getElementById('hostDropZone'),
         document.querySelector('input[name="host_file"]'),
@@ -134,14 +130,13 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('keyFileList')
     );
 
-    // Key Generation Logic
+    // Key generation
     window.generateKeyPair = async function() {
         const passphrase = document.getElementById('keyPassphrase').value;
         const generateButton = document.getElementById('generateKeyButton');
-        const originalButtonText = generateButton.innerHTML;
+        const originalText = generateButton.innerHTML;
 
         try {
-            // Show loading state
             generateButton.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Generating...';
             generateButton.disabled = true;
 
@@ -154,18 +149,14 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if (!response.ok) throw new Error(await response.text());
-
             const keys = await response.json();
 
-            // Update UI with new keys
             document.getElementById('publicKeyArea').value = keys.public_key;
             document.getElementById('privateKeyArea').value = keys.private_key;
 
-            // Show download buttons
             document.getElementById('downloadPublicKey').style.display = 'block';
             document.getElementById('downloadPrivateKey').style.display = 'block';
 
-            // Set up download handlers
             document.getElementById('downloadPublicKey').onclick = () => {
                 downloadKey(keys.public_key, 'public_key.pem');
             };
@@ -176,7 +167,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             alert(`Key generation failed: ${error.message}`);
         } finally {
-            generateButton.innerHTML = originalButtonText;
+            generateButton.innerHTML = originalText;
             generateButton.disabled = false;
         }
     };
@@ -193,63 +184,37 @@ document.addEventListener('DOMContentLoaded', () => {
         URL.revokeObjectURL(url);
     }
 
-    // Form Submission Handler
-    document.getElementById('hideForm').addEventListener('submit', async (e) => {
+    // Hide form submit with spinner
+    document.getElementById("hideForm").addEventListener("submit", function(e) {
         e.preventDefault();
-        
+
         const formData = new FormData(e.target);
-        const progressBar = document.getElementById('progress_bar');
-        const progressText = document.getElementById('progress_text');
+        const hideBtn = document.getElementById("hideBtn");
+        const hideSpinner = document.getElementById("hideSpinner");
 
-        // Validate generated keys or uploaded public key
-        const generatedPublicKey = document.getElementById('publicKeyArea').value;
-        const uploadedPublicKey = document.querySelector('input[name="public_key"]').files[0];
-        
-        if (!generatedPublicKey && !uploadedPublicKey) {
-            alert('Please generate or upload a public key');
-            return;
-        }
+        hideBtn.disabled = true;
+        hideSpinner.style.display = "block";
 
-        // Use generated key if available
-        if (generatedPublicKey) {
-            const keyFile = new File([generatedPublicKey], 'public_key.pem', 
-                                   { type: 'text/plain' });
-            formData.set('public_key', keyFile);
-        }
-
-        // Show progress
-        progressBar.style.width = '0%';
-        progressBar.textContent = '0%';
-        document.getElementById('progress_div').style.display = 'block';
-
-        try {
-            const response = await fetch('/hide/', {
-                method: 'POST',
-                body: formData
-            });
-
-            if (!response.ok) throw new Error(await response.text());
-
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-            
-            // Auto-download result
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `stego_${formData.get('host_file').name}`;
-            document.body.appendChild(a);
+        fetch("/hide/", {
+            method: "POST",
+            body: formData
+        }).then(res => res.blob())
+          .then(blob => {
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = "stego_image.png";
             a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-
-        } catch (error) {
-            alert(`Error: ${error.message}`);
-        } finally {
-            document.getElementById('progress_div').style.display = 'none';
-        }
+          })
+          .catch(() => {
+            alert("An error occurred during hiding process.");
+          })
+          .finally(() => {
+            hideBtn.disabled = false;
+            hideSpinner.style.display = "none";
+          });
     });
 
-    // Image Capacity Calculator
+    // Capacity check
     document.querySelector('input[name="host_file"]').addEventListener('change', function() {
         const file = this.files[0];
         if (!file) return;
@@ -259,13 +224,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const capacityKB = Math.floor((img.width * img.height * 3) / 1024);
             document.getElementById('capacityValue').textContent = capacityKB;
             document.getElementById('capacityWarning').style.display = 'block';
-            
+
             const hiddenFile = document.querySelector('input[name="hidden_file"]').files[0];
             if (hiddenFile) {
                 const fileSizeKB = Math.floor(hiddenFile.size / 1024);
                 if (fileSizeKB > capacityKB) {
                     document.getElementById('fileSizeWarning').style.display = 'block';
-                    document.getElementById('fileSizeWarning').textContent = 
+                    document.getElementById('fileSizeWarning').textContent =
                         `File too large (${fileSizeKB}KB > ${capacityKB}KB)`;
                 }
             }
@@ -273,7 +238,6 @@ document.addEventListener('DOMContentLoaded', () => {
         img.src = URL.createObjectURL(file);
     });
 
-    // File Size Checker
     document.querySelector('input[name="hidden_file"]').addEventListener('change', function() {
         const hostFile = document.querySelector('input[name="host_file"]').files[0];
         if (!hostFile) return;
@@ -282,10 +246,10 @@ document.addEventListener('DOMContentLoaded', () => {
         img.onload = () => {
             const capacityKB = Math.floor((img.width * img.height * 3) / 1024);
             const fileSizeKB = Math.floor(this.files[0].size / 1024);
-            
+
             if (fileSizeKB > capacityKB) {
                 document.getElementById('fileSizeWarning').style.display = 'block';
-                document.getElementById('fileSizeWarning').textContent = 
+                document.getElementById('fileSizeWarning').textContent =
                     `File too large (${fileSizeKB}KB > ${capacityKB}KB)`;
             } else {
                 document.getElementById('fileSizeWarning').style.display = 'none';
