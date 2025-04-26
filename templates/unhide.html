@@ -26,15 +26,14 @@
                placeholder="Enter passphrase (if required)">
     </div>
 
-    <button type="submit" class="btn btn-success btn-lg w-100">Decrypt and Extract</button>
-</form>
-
-<div class="mt-4" id="progress_div" style="display: none;">
-    <div class="progress">
-        <div class="progress-bar" id="progress_bar" role="progressbar" style="width: 0%;">0%</div>
+    <div class="d-grid gap-2">
+        <button type="submit" id="unhideBtn" class="btn btn-success btn-lg">Decrypt and Extract</button>
+        <div id="unhideSpinner" class="text-center mt-3" style="display: none;">
+            <div class="spinner-border text-success" role="status"></div>
+            <p class="mt-2">Decrypting and extracting file...</p>
+        </div>
     </div>
-    <div class="mt-2 text-muted" id="progress_text"></div>
-</div>
+</form>
 {% endblock %}
 
 {% block scripts %}
@@ -42,10 +41,9 @@
 document.addEventListener('DOMContentLoaded', () => {
     function setupDropZone(dropZone, input, fileList) {
         dropZone.addEventListener('click', () => input.click());
-        
+
         input.addEventListener('change', () => {
-            fileList.innerHTML = input.files[0] ? 
-                `<li>${input.files[0].name}</li>` : '';
+            fileList.innerHTML = input.files[0] ? `<li>${input.files[0].name}</li>` : '';
         });
 
         dropZone.addEventListener('dragover', (e) => {
@@ -61,12 +59,10 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             dropZone.classList.remove('dragover');
             input.files = e.dataTransfer.files;
-            fileList.innerHTML = input.files[0] ? 
-                `<li>${input.files[0].name}</li>` : '';
+            fileList.innerHTML = input.files[0] ? `<li>${input.files[0].name}</li>` : '';
         });
     }
 
-    // Initialize drop zones
     setupDropZone(
         document.getElementById('stegoDropZone'),
         document.querySelector('input[name="stego_image"]'),
@@ -79,17 +75,15 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('keyFileList')
     );
 
-    // Form submission handler
     document.getElementById('unhideForm').addEventListener('submit', async (e) => {
         e.preventDefault();
-        
-        const formData = new FormData(e.target);
-        const progressBar = document.getElementById('progress_bar');
-        const progressText = document.getElementById('progress_text');
 
-        progressBar.style.width = '0%';
-        progressBar.textContent = '0%';
-        document.getElementById('progress_div').style.display = 'block';
+        const formData = new FormData(e.target);
+        const unhideBtn = document.getElementById('unhideBtn');
+        const spinner = document.getElementById('unhideSpinner');
+
+        unhideBtn.disabled = true;
+        spinner.style.display = 'block';
 
         try {
             const response = await fetch('/unhide/', {
@@ -99,16 +93,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (!response.ok) {
                 const error = await response.json();
-                throw new Error(error.detail);
+                throw new Error(error.detail || 'Unknown error');
             }
 
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
-            
-            // Extract filename from content-disposition header
+
             const filename = response.headers.get('content-disposition')
-                            ?.split('filename=')[1]
-                            ?.replace(/"/g, '') || 'extracted_file';
+                ?.split('filename=')[1]
+                ?.replace(/"/g, '') || 'extracted_file';
 
             const a = document.createElement('a');
             a.href = url;
@@ -121,7 +114,8 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             alert(`Error: ${error.message}`);
         } finally {
-            document.getElementById('progress_div').style.display = 'none';
+            unhideBtn.disabled = false;
+            spinner.style.display = 'none';
         }
     });
 });
