@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
-<h2 class="mb-4">Hide File</h2>
+<h2 class="mb-4">Encrypt and Hide</h2>
 <form id="hideForm" enctype="multipart/form-data">
     <!-- Host File Section -->
     <div class="mb-4">
-        <label class="form-label h5">Host Image (PNG)</label>
+        <label class="form-label h5">Stego-Container (PNG, JPG, BMP only):</label>
         <div class="drop-zone" id="hostDropZone">
-            <span class="text-muted">Drag & drop PNG image here or click to select</span>
+            <span class="text-muted">Drag & drop your file or click to select</span>
             <input type="file" name="host_file" class="hidden-input" accept="image/png" required>
             <ul class="file-list" id="hostFileList"></ul>
         </div>
@@ -17,7 +17,7 @@
 
     <!-- File to Hide Section -->
     <div class="mb-4">
-        <label class="form-label h5">File to Hide</label>
+        <label class="form-label h5">File to hide (Any file format):</label>
         <div class="drop-zone" id="hiddenDropZone">
             <span class="text-muted">Drag & drop file to hide here or click to select</span>
             <input type="file" name="hidden_file" class="hidden-input" required>
@@ -30,15 +30,15 @@
     <div class="mb-4">
         <div class="card">
             <div class="card-header">
-                RSA Key Generation
+                Keys Generation (RSA 2048 + AES 256)
                 <button type="button" class="btn btn-sm btn-secondary float-end" 
                         id="generateKeyButton" onclick="generateKeyPair()">
                     Generate Keys
-                </button>
+                </button>  
             </div>
             <div class="card-body">
                 <div class="mb-3">
-                    <label class="form-label">Passphrase (optional):</label>
+                    <label class="form-label">Password (optional):</label>
                     <input type="password" id="keyPassphrase" class="form-control">
                 </div>
                 <div class="row">

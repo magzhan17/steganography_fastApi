@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
-<h2 class="mb-4">Unhide File</h2>
+<h2 class="mb-4">Decrypt and Unhide</h2>
 <form id="unhideForm" enctype="multipart/form-data">
     <div class="mb-4">
-        <label class="form-label h5">Stego Image</label>
+        <label class="form-label h5">Payload</label>
         <div class="drop-zone" id="stegoDropZone">
             <span class="text-muted">Drag & drop stego image here or click to select</span>
             <input type="file" name="stego_image" class="hidden-input" accept="image/png" required>
@@ -21,9 +21,9 @@
     </div>
 
     <div class="mb-4">
-        <label class="form-label h5">Passphrase</label>
+        <label class="form-label h5">Password</label>
         <input type="password" name="passphrase" class="form-control form-control-lg" 
-               placeholder="Enter passphrase (if required)">
+               placeholder="Enter password (if required)">
     </div>
 
     <div class="d-grid gap-2">
