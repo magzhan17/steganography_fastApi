@@ -4,10 +4,10 @@
 <form id="hideForm" enctype="multipart/form-data">
     <!-- Host File Section -->
     <div class="mb-4">
-        <label class="form-label h5">Stego-Container (PNG, JPG, BMP only):</label>
+        <label class="form-label h5">Stego-Container (PNG, JPG, BMP, WAV only):</label>
         <div class="drop-zone" id="hostDropZone">
             <span class="text-muted">Drag & drop your file or click to select</span>
-            <input type="file" name="host_file" class="hidden-input" accept="image/png" required>
+            <input type="file" name="host_file" class="hidden-input" accept="image/png, image/jpeg, image/bmp, audio/wav" required>
             <ul class="file-list" id="hostFileList"></ul>
         </div>
         <div id="capacityWarning" class="alert alert-warning mt-2" style="display: none;">
@@ -198,20 +198,25 @@ document.addEventListener('DOMContentLoaded', () => {
         fetch("/hide/", {
             method: "POST",
             body: formData
-        }).then(res => res.blob())
-          .then(blob => {
+        }).then(res => {
+            const contentDisposition = res.headers.get('content-disposition');
+            return res.blob().then(blob => ({ blob, contentDisposition }));
+        }).then(({ blob, contentDisposition }) => {
             const a = document.createElement("a");
-            a.href = URL.createObjectURL(blob);
-            a.download = "stego_image.png";
+            const url = URL.createObjectURL(blob);
+            const filename = contentDisposition?.split('filename=')[1]?.replace(/"/g, '') || 'stego_output';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
             a.click();
-          })
-          .catch(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }).catch(() => {
             alert("An error occurred during hiding process.");
-          })
-          .finally(() => {
+        }).finally(() => {
             hideBtn.disabled = false;
             hideSpinner.style.display = "none";
-          });
+        });
     });
 
     // Capacity check

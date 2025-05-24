@@ -18,6 +18,8 @@ import struct
 import base64
 import zlib
 import io
+import mimetypes
+import wave
 
 app = FastAPI()
 
@@ -48,16 +50,13 @@ def calculate_capacity(image):
     return (width * height * BITS_PER_PIXEL) // 8
 
 def embed_lsb(host_image, data):
-    """Efficiently embed data into an image using LSB steganography."""
     img_array = np.array(host_image).copy()
 
     if img_array.ndim != 3 or img_array.shape[2] < BITS_PER_PIXEL:
         raise ValueError("Image must have at least 3 channels (RGB)")
 
-    # Flatten image for faster access
     flat_image = img_array[:, :, :BITS_PER_PIXEL].flatten()
 
-    # Prepare binary data with length header
     data_len = len(data).to_bytes(4, 'big')
     binary_data = bytes_to_binary(data_len + data)
     num_bits = len(binary_data)
@@ -65,15 +64,36 @@ def embed_lsb(host_image, data):
     if num_bits > len(flat_image):
         raise ValueError("Image too small to hide data")
 
-    # Convert to array of ints (0 or 1) and update LSBs
     binary_bits = np.array(list(binary_data), dtype=np.uint8)
-    flat_image[:num_bits] &= 0b11111110  # Clear LSB
-    flat_image[:num_bits] |= binary_bits  # Set new LSB
+    flat_image[:num_bits] &= 0b11111110
+    flat_image[:num_bits] |= binary_bits
 
-    # Reshape and replace into image
     img_array[:, :, :BITS_PER_PIXEL] = flat_image.reshape(img_array.shape[0], img_array.shape[1], BITS_PER_PIXEL)
     return Image.fromarray(img_array)
 
+
+def embed_lsb_audio(audio_data: bytes, data: bytes) -> bytes:
+    with wave.open(io.BytesIO(audio_data), 'rb') as wav:
+        params = wav.getparams()
+        frames = bytearray(wav.readframes(wav.getnframes()))
+
+    data_len = len(data).to_bytes(4, 'big')
+    binary_data = bytes_to_binary(data_len + data)
+    num_bits = len(binary_data)
+
+    if num_bits > len(frames):
+        raise ValueError("Audio file too small to hide data")
+
+    for i in range(num_bits):
+        frames[i] &= 0b11111110
+        frames[i] |= int(binary_data[i])
+
+    out_io = io.BytesIO()
+    with wave.open(out_io, 'wb') as out_wav:
+        out_wav.setparams(params)
+        out_wav.writeframes(frames)
+    out_io.seek(0)
+    return out_io.read()
 
 
 def extract_lsb(image):
@@ -81,7 +101,6 @@ def extract_lsb(image):
     height, width, channels = img_array.shape
     binary_data = []
 
-    # Extract first 32 bits (4 bytes) for data length
     data_len_bits = []
     bits_collected = 0
     for row in range(height):
@@ -99,8 +118,6 @@ def extract_lsb(image):
             break
 
     data_len = int(''.join(data_len_bits), 2)
-
-    # Extract full (length header + data) bits
     total_bits_needed = (data_len + 4) * 8
     bits_collected = 0
     binary_data = []
@@ -119,50 +136,57 @@ def extract_lsb(image):
             break
 
     full_data = binary_to_bytes(''.join(binary_data))
-    return full_data[4:4+data_len]  # correct slicing now
+    return full_data[4:4+data_len]
+
+
+def extract_lsb_audio(audio_data: bytes) -> bytes:
+    with wave.open(io.BytesIO(audio_data), 'rb') as wav:
+        frames = bytearray(wav.readframes(wav.getnframes()))
+
+    data_len_bits = ''.join(str(frames[i] & 1) for i in range(32))
+    data_len = int(data_len_bits, 2)
+    total_bits = (data_len + 4) * 8
+    bits = ''.join(str(frames[i] & 1) for i in range(total_bits))
+    data = binary_to_bytes(bits)
+    return data[4:4+data_len]
 
 
 def encrypt_data(data, public_key_data):
     public_key = RSA.import_key(public_key_data)
     cipher_rsa = PKCS1_OAEP.new(public_key)
-    
+
     session_key = get_random_bytes(16)
     salt = get_random_bytes(SALT_SIZE)
     key = PBKDF2(session_key, salt, dkLen=KEY_SIZE, count=NUM_ITERATIONS)
-    
-    # Encrypt with AES in reverse order for layered decryption
+
     encrypted = zlib.compress(data)
     for _ in range(NUM_LAYERS):
         iv = get_random_bytes(IV_SIZE)
         cipher = AES.new(key, AES.MODE_CBC, iv)
         encrypted = cipher.encrypt(pad(encrypted, AES.block_size))
         encrypted = iv + encrypted
-    
-    # Combine components
+
     enc_session_key = cipher_rsa.encrypt(session_key)
     return enc_session_key + salt + encrypted
 
 def decrypt_data(encrypted_data, private_key_data, passphrase):
     private_key = RSA.import_key(private_key_data, passphrase=passphrase)
     cipher_rsa = PKCS1_OAEP.new(private_key)
-    
-    # Split components
+
     key_size = private_key.size_in_bytes()
     enc_session_key = encrypted_data[:key_size]
     salt = encrypted_data[key_size:key_size+SALT_SIZE]
     data = encrypted_data[key_size+SALT_SIZE:]
-    
-    # Derive key
+
     session_key = cipher_rsa.decrypt(enc_session_key)
     key = PBKDF2(session_key, salt, dkLen=KEY_SIZE, count=NUM_ITERATIONS)
-    
-    # Decrypt layers
+
     for _ in range(NUM_LAYERS):
         iv = data[:IV_SIZE]
         data = data[IV_SIZE:]
         cipher = AES.new(key, AES.MODE_CBC, iv)
         data = unpad(cipher.decrypt(data), AES.block_size)
-    
+
     return zlib.decompress(data)
 
 @app.get("/", response_class=HTMLResponse)
@@ -180,48 +204,52 @@ async def hide_file(
     public_key: UploadFile = File(...),
 ):
     try:
-        # Read inputs
-        host_image_data = await host_file.read()
+        host_data = await host_file.read()
         hidden_data_raw = await hidden_file.read()
         public_key_data = await public_key.read()
 
-        # Encode filename safely
         filename_bytes = hidden_file.filename.encode("utf-8")
         if len(filename_bytes) > 255:
             raise ValueError("Filename too long (max 255 bytes)")
         hidden_data = len(filename_bytes).to_bytes(1, "big") + filename_bytes + hidden_data_raw
 
-        # Load host image
-        host_image = Image.open(io.BytesIO(host_image_data))
-        if host_image.mode not in ["RGB", "RGBA"]:
-            raise ValueError("Only RGB/RGBA images supported")
-
-        # Encrypt hidden data
         encrypted_data = encrypt_data(hidden_data, public_key_data)
 
-        # Check capacity
-        capacity = calculate_capacity(host_image)
-        if len(encrypted_data) > capacity:
-            raise ValueError(f"Image too small. Needs {len(encrypted_data)} bytes, has {capacity}")
+        mime_type, _ = mimetypes.guess_type(host_file.filename)
+        if mime_type and mime_type.startswith("image"):
+            host_image = Image.open(io.BytesIO(host_data))
+            if host_image.mode not in ["RGB", "RGBA"]:
+                raise ValueError("Only RGB/RGBA images supported")
+            capacity = calculate_capacity(host_image)
+            if len(encrypted_data) > capacity:
+                raise ValueError(f"Image too small. Needs {len(encrypted_data)} bytes, has {capacity}")
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                stego_image = await loop.run_in_executor(pool, embed_lsb, host_image, encrypted_data)
+            buffer = io.BytesIO()
+            stego_image.save(buffer, format="PNG")
+            media_type = "image/png"
+            extension = "png"
 
-        # Run embedding asynchronously
-        loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor() as pool:
-            stego_image = await loop.run_in_executor(pool, embed_lsb, host_image, encrypted_data)
+        elif mime_type and mime_type.startswith("audio") and host_file.filename.endswith(".wav"):
+            stego_audio = embed_lsb_audio(host_data, encrypted_data)
+            buffer = io.BytesIO(stego_audio)
+            media_type = "audio/wav"
+            extension = "wav"
 
-        # Save stego image to buffer
-        buffer = io.BytesIO()
-        stego_image.save(buffer, format="PNG")
+        else:
+            raise ValueError("Unsupported file type for hiding")
+
         buffer.seek(0)
-
         return StreamingResponse(
             buffer,
-            media_type="image/png",
+            media_type=media_type,
             headers={"Content-Disposition": f"attachment; filename=stego_{host_file.filename}"}
         )
 
     except Exception as e:
         raise HTTPException(500, detail=f"Error: {str(e)}")
+
 
 @app.get("/unhide", response_class=HTMLResponse)
 async def unhide_page(request: Request):
@@ -237,14 +265,22 @@ async def unhide_file(
         image_data = await stego_image.read()
         private_key_data = await private_key.read()
 
-        image = Image.open(io.BytesIO(image_data))
-        if image.mode not in ['RGB', 'RGBA']:
-            raise ValueError("Only RGB/RGBA images supported")
+        mime_type, _ = mimetypes.guess_type(stego_image.filename)
 
-        encrypted_data = extract_lsb(image)
+        if mime_type and mime_type.startswith("image"):
+            image = Image.open(io.BytesIO(image_data))
+            if image.mode not in ['RGB', 'RGBA']:
+                raise ValueError("Only RGB/RGBA images supported")
+            encrypted_data = extract_lsb(image)
+
+        elif mime_type and mime_type.startswith("audio") and stego_image.filename.endswith(".wav"):
+            encrypted_data = extract_lsb_audio(image_data)
+
+        else:
+            raise ValueError("Unsupported file type for extraction")
+
         decrypted_data = decrypt_data(encrypted_data, private_key_data, passphrase)
 
-        # Recover original filename
         name_len = decrypted_data[0]
         filename = decrypted_data[1:1+name_len].decode()
         file_content = decrypted_data[1+name_len:]
@@ -254,7 +290,7 @@ async def unhide_file(
                                  headers={"Content-Disposition": f"attachment; filename={filename}"})
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
- 
+
 @app.post("/generate-keypair/")
 async def generate_keypair(passphrase: str = Form(default='')):
     try:
