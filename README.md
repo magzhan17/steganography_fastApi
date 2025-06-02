@@ -1,4 +1,4 @@
-"# steganography_fastApi" 
+# steganography_fastApi 
 # Docker needs to be installed!!!
 
 # Build the Docker image
